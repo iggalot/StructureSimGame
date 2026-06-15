@@ -1,0 +1,9 @@
+<Window x:Class="StructureFailureSimulator.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Structure Failure Simulator" Height="700" Width="1000">
+
+    <Grid>
+        <Canvas Name="RenderCanvas" Background="Black"/>
+    </Grid>
+</Window>

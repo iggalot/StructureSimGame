@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 
 namespace StructureFailureSimulator
 {
@@ -7,7 +9,13 @@ namespace StructureFailureSimulator
         public Structure Structure { get; private set; }
         public RunContext Run { get; private set; }
 
-        private FEMSolver _solver = new();
+        private readonly FEMSolver _solver = new FEMSolver();
+
+        // =========================
+        // TEMP LOAD STORAGE (PER STEP)
+        // =========================
+        private readonly Dictionary<Node, (float ux, float uy)> _nodeLoads
+            = new Dictionary<Node, (float ux, float uy)>();
 
         public void Initialize(Structure structure, RunContext run)
         {
@@ -15,6 +23,9 @@ namespace StructureFailureSimulator
             Run = run;
         }
 
+        // =========================
+        // MAIN STEP
+        // =========================
         public void Step()
         {
             if (Structure == null || Run == null)
@@ -22,26 +33,37 @@ namespace StructureFailureSimulator
 
             Run.Advance();
 
-            ApplyEnvironmentLoads();
+            ApplyEnvironmentLoads(); // optional influence via node properties
 
-            // 🔥 THIS IS THE KEY FIX
             _solver.Solve(Structure);
 
             ApplyFailureModel();
         }
 
+        // =========================
+        // LOADS (NO STRUCTURE MUTATION)
+        // =========================
         private void ApplyEnvironmentLoads()
         {
-            foreach (var n in Structure.Nodes)
-            {
-                float wind = (float)Run.WindStrength;
-                float seismic = (float)Run.SeismicPulse;
+            _nodeLoads.Clear();
 
-                n.Uy += wind * 0.01;
-                n.Ux += seismic * 0.005;
+            float wind = (float)Run.WindStrength;
+            float seismic = (float)Run.SeismicPulse;
+
+            for (int i = 0; i < Structure.Nodes.Count; i++)
+            {
+                var n = Structure.Nodes[i];
+
+                _nodeLoads[n] = (
+                    ux: seismic * 0.005f,
+                    uy: wind * 0.01f
+                );
             }
         }
 
+        // =========================
+        // FAILURE MODEL (POST-SOLVE ONLY)
+        // =========================
         private void ApplyFailureModel()
         {
             foreach (var m in Structure.Members)
@@ -49,13 +71,17 @@ namespace StructureFailureSimulator
                 if (m.Failed)
                     continue;
 
-                if (m.AxialForce > m.YieldStrength)
+                float force = (float)Math.Abs(m.AxialForce);
+
+                if (force > m.YieldStrength)
                 {
                     m.Failed = true;
 
-                    // cascade instability
-                    m.A.Uy += 1;
-                    m.B.Uy += 1;
+                    // mild damping to avoid energy injection spikes
+                    m.A.Ux *= 0.95f;
+                    m.A.Uy *= 0.95f;
+                    m.B.Ux *= 0.95f;
+                    m.B.Uy *= 0.95f;
                 }
             }
         }

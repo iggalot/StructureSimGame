@@ -1,37 +1,18 @@
 using System;
-using System.Linq;
 using System.Numerics;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
-using System.Windows.Controls;
-using System.Windows.Threading;
 
 namespace StructureFailureSimulator
 {
     public partial class MainWindow : Window
     {
-        // =========================
-        // CORE SIMULATION
-        // =========================
         private readonly SimulationEngine _engine = new SimulationEngine();
         private readonly Structure _structure = new Structure();
         private readonly RunContext _run = new RunContext(Environment.TickCount);
-
-        private readonly DispatcherTimer _timer = new DispatcherTimer();
-
-        // =========================
-        // GAME STATE
-        // =========================
-        private enum GameState
-        {
-            Build,
-            Simulate,
-            Results
-        }
-
-        private GameState _state = GameState.Build;
 
         private enum ToolMode
         {
@@ -43,11 +24,10 @@ namespace StructureFailureSimulator
         private ToolMode _tool = ToolMode.Node;
         private Node _selectedNode;
 
-        // =========================
-        // CAMERA
-        // =========================
-        private Vector2 _cameraOffset = new Vector2(0, 0);
-        private double _zoom = 1.0;
+        private GameState _state = GameState.Build;
+
+        // ONLY redraw when needed
+        private bool _needsRedraw = true;
 
         private const double DisplacementScale = 60.0;
 
@@ -57,62 +37,36 @@ namespace StructureFailureSimulator
 
             _engine.Initialize(_structure, _run);
 
-            _timer.Interval = TimeSpan.FromMilliseconds(33);
-            _timer.Tick += Tick;
-            _timer.Start();
+            Draw(); // initial render
         }
 
         // =========================
-        // GAME LOOP
-        // =========================
-        private void Tick(object sender, EventArgs e)
-        {
-            if (_state == GameState.Simulate)
-            {
-                _engine.Step();
-            }
-
-            Draw();
-        }
-
-        // =========================
-        // CAMERA TRANSFORM
+        // CAMERA (kept simple / stable)
         // =========================
         private Vector2 WorldToScreen(Vector2 p)
         {
+            return new Vector2(p.X, p.Y);
+        }
+
+        private Vector2 Deform(Node n)
+        {
             return new Vector2(
-                (p.X + _cameraOffset.X) * (float)_zoom,
-                (p.Y + _cameraOffset.Y) * (float)_zoom
-            );
-        }
-
-        private void CenterCamera()
-        {
-            if (_structure.Nodes.Count == 0) return;
-
-            float avgX = _structure.Nodes.Average(n => n.Position.X);
-            float avgY = _structure.Nodes.Average(n => n.Position.Y);
-
-            _cameraOffset = new Vector2(
-                (float)(RenderCanvas.ActualWidth / 2 / _zoom - avgX),
-                (float)(RenderCanvas.ActualHeight / 2 / _zoom - avgY)
+                n.Position.X + (float)(n.Ux * DisplacementScale),
+                n.Position.Y + (float)(n.Uy * DisplacementScale)
             );
         }
 
         // =========================
-        // INPUT (BUILD MODE)
+        // CLICK INPUT (INSTANT)
         // =========================
-        private void Canvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        private void Canvas_Click(object sender, MouseButtonEventArgs e)
         {
-            if (_state != GameState.Build)
-                return;
-
             var pos = e.GetPosition(RenderCanvas);
 
-            Vector2 world = new Vector2(
-                (float)(pos.X / _zoom - _cameraOffset.X),
-                (float)(pos.Y / _zoom - _cameraOffset.Y)
-            );
+            Vector2 world = new Vector2((float)pos.X, (float)pos.Y);
+
+            if (_state != GameState.Build)
+                return;
 
             if (_tool == ToolMode.Node)
             {
@@ -120,6 +74,8 @@ namespace StructureFailureSimulator
                 {
                     Position = world
                 });
+
+                _needsRedraw = true;
             }
             else if (_tool == ToolMode.Support)
             {
@@ -128,11 +84,12 @@ namespace StructureFailureSimulator
                     Position = world,
                     IsFixedSupport = true
                 });
+
+                _needsRedraw = true;
             }
             else if (_tool == ToolMode.Connect)
             {
                 var n = FindClosestNode(world);
-
                 if (n == null) return;
 
                 if (_selectedNode == null)
@@ -148,11 +105,15 @@ namespace StructureFailureSimulator
                             A = _selectedNode,
                             B = n
                         });
+
+                        _needsRedraw = true;
                     }
 
                     _selectedNode = null;
                 }
             }
+
+            Draw(); // immediate feedback (NO TIMER DELAY)
         }
 
         private Node FindClosestNode(Vector2 p)
@@ -180,18 +141,10 @@ namespace StructureFailureSimulator
         // =========================
         // TOOL BUTTONS
         // =========================
-        private void ToolNode_Click(object sender, RoutedEventArgs e)
-            => _tool = ToolMode.Node;
+        private void ToolNode_Click(object sender, RoutedEventArgs e) => _tool = ToolMode.Node;
+        private void ToolSupport_Click(object sender, RoutedEventArgs e) => _tool = ToolMode.Support;
+        private void ToolConnect_Click(object sender, RoutedEventArgs e) => _tool = ToolMode.Connect;
 
-        private void ToolSupport_Click(object sender, RoutedEventArgs e)
-            => _tool = ToolMode.Support;
-
-        private void ToolConnect_Click(object sender, RoutedEventArgs e)
-            => _tool = ToolMode.Connect;
-
-        // =========================
-        // SIMULATION CONTROLS
-        // =========================
         private void StartRun_Click(object sender, RoutedEventArgs e)
         {
             _state = GameState.Simulate;
@@ -199,48 +152,42 @@ namespace StructureFailureSimulator
 
         private void StopRun_Click(object sender, RoutedEventArgs e)
         {
-            _state = GameState.Results;
+            _state = GameState.Build;
         }
 
         private void ReturnToBuild_Click(object sender, RoutedEventArgs e)
         {
             _state = GameState.Build;
             _selectedNode = null;
-        }
 
-        private void Reset_Click(object sender, RoutedEventArgs e)
-        {
-            _structure.Nodes.Clear();
-            _structure.Members.Clear();
-            _selectedNode = null;
+            Draw();
         }
 
         // =========================
-        // RENDERING
+        // SIMULATION STEP (MANUAL CONTROL OR BUTTON DRIVEN)
+        // =========================
+        private void StepSimulation()
+        {
+            _engine.Step();
+            _needsRedraw = true;
+            Draw();
+        }
+
+        // =========================
+        // RENDERING (ONLY WHEN NEEDED)
         // =========================
         private void Draw()
         {
+            if (!_needsRedraw)
+                return;
+
             RenderCanvas.Children.Clear();
 
-            CenterCamera();
-
-            // =========================
-            // MEMBERS (FEM DEFORMED)
-            // =========================
+            // MEMBERS
             foreach (var m in _structure.Members)
             {
-                Vector2 aWorld = new Vector2(
-                    m.A.Position.X + (float)(m.A.Ux * DisplacementScale),
-                    m.A.Position.Y + (float)(m.A.Uy * DisplacementScale)
-                );
-
-                Vector2 bWorld = new Vector2(
-                    m.B.Position.X + (float)(m.B.Ux * DisplacementScale),
-                    m.B.Position.Y + (float)(m.B.Uy * DisplacementScale)
-                );
-
-                Vector2 a = WorldToScreen(aWorld);
-                Vector2 b = WorldToScreen(bWorld);
+                Vector2 a = WorldToScreen(Deform(m.A));
+                Vector2 b = WorldToScreen(Deform(m.B));
 
                 double stress = Math.Abs(m.AxialForce) / Math.Max(1, m.YieldStrength);
 
@@ -251,62 +198,53 @@ namespace StructureFailureSimulator
                     stress < 1.0 ? Brushes.Orange :
                     Brushes.Magenta;
 
-                var line = new Line
+                RenderCanvas.Children.Add(new Line
                 {
                     X1 = a.X,
                     Y1 = a.Y,
                     X2 = b.X,
                     Y2 = b.Y,
                     Stroke = color,
-                    StrokeThickness = m.Failed ? 4 : 2,
-                    Opacity = m.Failed ? 0.4 : 1.0
-                };
-
-                RenderCanvas.Children.Add(line);
+                    StrokeThickness = m.Failed ? 4 : 2
+                });
             }
 
-            // =========================
             // NODES
-            // =========================
             foreach (var n in _structure.Nodes)
             {
-                Vector2 world = new Vector2(
-                    n.Position.X + (float)(n.Ux * DisplacementScale),
-                    n.Position.Y + (float)(n.Uy * DisplacementScale)
-                );
-
-                Vector2 screen = WorldToScreen(world);
+                Vector2 p = WorldToScreen(Deform(n));
 
                 var ell = new Ellipse
                 {
                     Width = 10,
                     Height = 10,
-                    Fill = n.IsFixedSupport ? Brushes.Cyan : Brushes.White,
-                    Stroke = (n == _selectedNode) ? Brushes.Red : null,
-                    StrokeThickness = 2
+                    Fill = n.IsFixedSupport ? Brushes.Cyan : Brushes.White
                 };
 
-                Canvas.SetLeft(ell, screen.X - 5);
-                Canvas.SetTop(ell, screen.Y - 5);
-
                 RenderCanvas.Children.Add(ell);
+
+                Canvas.SetLeft(ell, p.X - 5);
+                Canvas.SetTop(ell, p.Y - 5);
             }
 
-            // =========================
-            // UI OVERLAY
-            // =========================
+            // UI TEXT
             var text = new TextBlock
             {
-                Text =
-                    $"State: {_state}  |  Nodes: {_structure.Nodes.Count}  |  Members: {_structure.Members.Count}",
-                Foreground = Brushes.White,
-                FontSize = 14
+                Text = $"State: {_state} | Nodes: {_structure.Nodes.Count} | Members: {_structure.Members.Count}",
+                Foreground = Brushes.White
             };
 
+            RenderCanvas.Children.Add(text);
             Canvas.SetLeft(text, 10);
             Canvas.SetTop(text, 10);
 
-            RenderCanvas.Children.Add(text);
+            _needsRedraw = false;
         }
+    }
+
+    public enum GameState
+    {
+        Build,
+        Simulate
     }
 }

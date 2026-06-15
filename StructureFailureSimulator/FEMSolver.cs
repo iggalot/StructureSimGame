@@ -7,9 +7,14 @@ namespace StructureFailureSimulator
     {
         private Structure _s;
 
+        // cached node lookup (CRITICAL FIX)
+        private Dictionary<Node, int> _nodeIndex = new();
+
         public void Solve(Structure structure)
         {
             _s = structure;
+
+            BuildNodeIndex(); // 🔥 FIX 1
 
             int n = _s.Nodes.Count * 3;
 
@@ -25,38 +30,56 @@ namespace StructureFailureSimulator
             ComputeMemberForces(D);
         }
 
+        // =========================
+        // FIX 1: O(1) NODE LOOKUP
+        // =========================
+        private void BuildNodeIndex()
+        {
+            _nodeIndex.Clear();
+
+            for (int i = 0; i < _s.Nodes.Count; i++)
+            {
+                _nodeIndex[_s.Nodes[i]] = i;
+            }
+        }
+
+        // =========================
+        // ASSEMBLY
+        // =========================
         private void Assemble(double[,] K, double[] F)
         {
             for (int e = 0; e < _s.Members.Count; e++)
             {
                 var m = _s.Members[e];
 
-                int i = _s.Nodes.IndexOf(m.A);
-                int j = _s.Nodes.IndexOf(m.B);
+                if (!_nodeIndex.TryGetValue(m.A, out int i)) continue;
+                if (!_nodeIndex.TryGetValue(m.B, out int j)) continue;
 
                 double L = m.Length;
                 double EA = m.E * m.AArea;
                 double EI = m.E * m.I;
 
-                // simplified axial + bending coupling (game FEM-lite)
                 double k = EA / L;
                 double kb = EI / (L * L * L);
 
-                int[] dof = new[]
+                int i0 = i * 3;
+                int j0 = j * 3;
+
+                int[] dof =
                 {
-                    i*3+0, i*3+1, i*3+2,
-                    j*3+0, j*3+1, j*3+2
+                    i0 + 0, i0 + 1, i0 + 2,
+                    j0 + 0, j0 + 1, j0 + 2
                 };
 
-                // AXIAL
-                Add(K, dof[0], dof[0], k);
-                Add(K, dof[0], dof[3], -k);
-                Add(K, dof[3], dof[0], -k);
-                Add(K, dof[3], dof[3], k);
+                // axial
+                K[dof[0], dof[0]] += k;
+                K[dof[0], dof[3]] -= k;
+                K[dof[3], dof[0]] -= k;
+                K[dof[3], dof[3]] += k;
 
-                // BENDING (very simplified coupling)
-                Add(K, dof[2], dof[2], kb);
-                Add(K, dof[5], dof[5], kb);
+                // bending (simplified)
+                K[dof[2], dof[2]] += kb;
+                K[dof[5], dof[5]] += kb;
 
                 // gravity load
                 F[dof[1]] -= 10;
@@ -64,18 +87,15 @@ namespace StructureFailureSimulator
             }
         }
 
-        private void Add(double[,] K, int i, int j, double v)
-        {
-            K[i, j] += v;
-        }
-
+        // =========================
+        // SUPPORTS
+        // =========================
         private void ApplySupports(double[,] K, double[] F)
         {
             for (int i = 0; i < _s.Nodes.Count; i++)
             {
-                var n = _s.Nodes[i];
-
-                if (!n.IsFixedSupport) continue;
+                if (!_s.Nodes[i].IsFixedSupport)
+                    continue;
 
                 for (int d = 0; d < 3; d++)
                 {
@@ -93,6 +113,9 @@ namespace StructureFailureSimulator
             }
         }
 
+        // =========================
+        // GAUSSIAN ELIMINATION (UNCHANGED)
+        // =========================
         private double[] SolveSystem(double[,] K, double[] F)
         {
             int n = F.Length;
@@ -127,6 +150,9 @@ namespace StructureFailureSimulator
             return x;
         }
 
+        // =========================
+        // DISPLACEMENTS
+        // =========================
         private void ApplyDisplacements(double[] D)
         {
             for (int i = 0; i < _s.Nodes.Count; i++)
@@ -139,12 +165,15 @@ namespace StructureFailureSimulator
             }
         }
 
+        // =========================
+        // MEMBER FORCES
+        // =========================
         private void ComputeMemberForces(double[] D)
         {
             foreach (var m in _s.Members)
             {
-                int i = _s.Nodes.IndexOf(m.A);
-                int j = _s.Nodes.IndexOf(m.B);
+                if (!_nodeIndex.TryGetValue(m.A, out int i)) continue;
+                if (!_nodeIndex.TryGetValue(m.B, out int j)) continue;
 
                 double dx = m.B.Ux - m.A.Ux;
                 double dy = m.B.Uy - m.A.Uy;

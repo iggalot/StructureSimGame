@@ -17,6 +17,8 @@ namespace StructureFailureSimulator
             RNG = new Random(seed);
         }
 
+        public RunContext() : this(Environment.TickCount) { }
+
         public void Advance()
         {
             Day++;

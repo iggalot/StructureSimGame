@@ -2,40 +2,64 @@ using System;
 using System.Linq;
 using System.Numerics;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Controls;
 using System.Windows.Threading;
 
 namespace StructureFailureSimulator
 {
     public partial class MainWindow : Window
     {
-        private GameManager _game = new();
-        private DispatcherTimer _timer = new();
+        // =========================
+        // CORE SIMULATION
+        // =========================
+        private readonly SimulationEngine _engine = new SimulationEngine();
+        private readonly Structure _structure = new Structure();
+        private readonly RunContext _run = new RunContext(Environment.TickCount);
+
+        private readonly DispatcherTimer _timer = new DispatcherTimer();
+
+        // =========================
+        // GAME STATE
+        // =========================
+        private enum GameState
+        {
+            Build,
+            Simulate,
+            Results
+        }
+
+        private GameState _state = GameState.Build;
 
         private enum ToolMode
         {
             Node,
-            SupportNode,
+            Support,
             Connect
         }
 
         private ToolMode _tool = ToolMode.Node;
         private Node _selectedNode;
 
+        // =========================
+        // CAMERA
+        // =========================
+        private Vector2 _cameraOffset = new Vector2(0, 0);
+        private double _zoom = 1.0;
+
+        private const double DisplacementScale = 60.0;
+
         public MainWindow()
         {
             InitializeComponent();
 
-            _game.StartNewRun(seed: 12345);
+            _engine.Initialize(_structure, _run);
 
-            _timer.Interval = TimeSpan.FromMilliseconds(50);
+            _timer.Interval = TimeSpan.FromMilliseconds(33);
             _timer.Tick += Tick;
             _timer.Start();
-
-            Draw();
         }
 
         // =========================
@@ -43,87 +67,107 @@ namespace StructureFailureSimulator
         // =========================
         private void Tick(object sender, EventArgs e)
         {
-            if (_game.State == GameState.Simulate)
+            if (_state == GameState.Simulate)
             {
-                _game.Engine.Step();
-
-                // auto-end if everything fails (simple win/lose condition)
-                if (_game.Structure.Members.Count > 0 &&
-                    _game.Structure.Members.All(m => m.Failed))
-                {
-                    _game.EndSimulation();
-                }
+                _engine.Step();
             }
 
             Draw();
         }
 
         // =========================
+        // CAMERA TRANSFORM
+        // =========================
+        private Vector2 WorldToScreen(Vector2 p)
+        {
+            return new Vector2(
+                (p.X + _cameraOffset.X) * (float)_zoom,
+                (p.Y + _cameraOffset.Y) * (float)_zoom
+            );
+        }
+
+        private void CenterCamera()
+        {
+            if (_structure.Nodes.Count == 0) return;
+
+            float avgX = _structure.Nodes.Average(n => n.Position.X);
+            float avgY = _structure.Nodes.Average(n => n.Position.Y);
+
+            _cameraOffset = new Vector2(
+                (float)(RenderCanvas.ActualWidth / 2 / _zoom - avgX),
+                (float)(RenderCanvas.ActualHeight / 2 / _zoom - avgY)
+            );
+        }
+
+        // =========================
         // INPUT (BUILD MODE)
         // =========================
-        private void Canvas_Click(object sender, MouseButtonEventArgs e)
+        private void Canvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            if (_game.State != GameState.Build)
+            if (_state != GameState.Build)
                 return;
 
             var pos = e.GetPosition(RenderCanvas);
-            var v = new Vector2((float)pos.X, (float)pos.Y);
+
+            Vector2 world = new Vector2(
+                (float)(pos.X / _zoom - _cameraOffset.X),
+                (float)(pos.Y / _zoom - _cameraOffset.Y)
+            );
 
             if (_tool == ToolMode.Node)
             {
-                _game.Structure.Nodes.Add(new Node
+                _structure.Nodes.Add(new Node
                 {
-                    Position = v
+                    Position = world
                 });
             }
-            else if (_tool == ToolMode.SupportNode)
+            else if (_tool == ToolMode.Support)
             {
-                _game.Structure.Nodes.Add(new Node
+                _structure.Nodes.Add(new Node
                 {
-                    Position = v,
+                    Position = world,
                     IsFixedSupport = true
                 });
             }
             else if (_tool == ToolMode.Connect)
             {
-                var clicked = FindClosestNode(v.X, v.Y);
+                var n = FindClosestNode(world);
 
-                if (clicked == null) return;
+                if (n == null) return;
 
                 if (_selectedNode == null)
                 {
-                    _selectedNode = clicked;
+                    _selectedNode = n;
                 }
                 else
                 {
-                    if (_selectedNode != clicked)
+                    if (_selectedNode != n)
                     {
-                        _game.Structure.Members.Add(new Member
+                        _structure.Members.Add(new Member
                         {
                             A = _selectedNode,
-                            B = clicked
+                            B = n
                         });
                     }
 
                     _selectedNode = null;
                 }
             }
-
-            Draw();
         }
 
-        private Node FindClosestNode(double x, double y)
+        private Node FindClosestNode(Vector2 p)
         {
             Node best = null;
-            double bestDist = double.MaxValue;
+            float bestDist = float.MaxValue;
 
-            foreach (var n in _game.Structure.Nodes)
+            foreach (var n in _structure.Nodes)
             {
-                double dx = n.Position.X - x;
-                double dy = n.Position.Y - y;
-                double d = dx * dx + dy * dy;
+                float dx = n.Position.X - p.X;
+                float dy = n.Position.Y - p.Y;
 
-                if (d < 400 && d < bestDist)
+                float d = dx * dx + dy * dy;
+
+                if (d < 5000 && d < bestDist)
                 {
                     bestDist = d;
                     best = n;
@@ -134,39 +178,40 @@ namespace StructureFailureSimulator
         }
 
         // =========================
-        // UI BUTTONS
+        // TOOL BUTTONS
         // =========================
         private void ToolNode_Click(object sender, RoutedEventArgs e)
-        {
-            _tool = ToolMode.Node;
-        }
+            => _tool = ToolMode.Node;
 
         private void ToolSupport_Click(object sender, RoutedEventArgs e)
-        {
-            _tool = ToolMode.SupportNode;
-        }
+            => _tool = ToolMode.Support;
 
         private void ToolConnect_Click(object sender, RoutedEventArgs e)
-        {
-            _tool = ToolMode.Connect;
-        }
+            => _tool = ToolMode.Connect;
 
+        // =========================
+        // SIMULATION CONTROLS
+        // =========================
         private void StartRun_Click(object sender, RoutedEventArgs e)
         {
-            if (_game.State == GameState.Build)
-            {
-                _game.BeginSimulation();
-            }
+            _state = GameState.Simulate;
         }
 
         private void StopRun_Click(object sender, RoutedEventArgs e)
         {
-            _game.EndSimulation();
+            _state = GameState.Results;
         }
 
         private void ReturnToBuild_Click(object sender, RoutedEventArgs e)
         {
-            _game.ReturnToBuild();
+            _state = GameState.Build;
+            _selectedNode = null;
+        }
+
+        private void Reset_Click(object sender, RoutedEventArgs e)
+        {
+            _structure.Nodes.Clear();
+            _structure.Members.Clear();
             _selectedNode = null;
         }
 
@@ -177,49 +222,61 @@ namespace StructureFailureSimulator
         {
             RenderCanvas.Children.Clear();
 
-            var structure = _game.Structure;
+            CenterCamera();
 
-            Title =
-                $"State: {_game.State} | " +
-                $"Day: {_game.Run?.Day ?? 0} | " +
-                $"Wind: {_game.Run?.WindStrength ?? 0:0.0} | " +
-                $"Seismic: {_game.Run?.SeismicPulse ?? 0:0.0}";
-
-            // draw members
-            foreach (var m in structure.Members)
+            // =========================
+            // MEMBERS (FEM DEFORMED)
+            // =========================
+            foreach (var m in _structure.Members)
             {
+                Vector2 aWorld = new Vector2(
+                    m.A.Position.X + (float)(m.A.Ux * DisplacementScale),
+                    m.A.Position.Y + (float)(m.A.Uy * DisplacementScale)
+                );
+
+                Vector2 bWorld = new Vector2(
+                    m.B.Position.X + (float)(m.B.Ux * DisplacementScale),
+                    m.B.Position.Y + (float)(m.B.Uy * DisplacementScale)
+                );
+
+                Vector2 a = WorldToScreen(aWorld);
+                Vector2 b = WorldToScreen(bWorld);
+
+                double stress = Math.Abs(m.AxialForce) / Math.Max(1, m.YieldStrength);
+
+                Brush color =
+                    m.Failed ? Brushes.Red :
+                    stress < 0.5 ? Brushes.LimeGreen :
+                    stress < 0.8 ? Brushes.Yellow :
+                    stress < 1.0 ? Brushes.Orange :
+                    Brushes.Magenta;
+
                 var line = new Line
                 {
-                    X1 = m.A.Position.X,
-                    Y1 = m.A.Position.Y,
-                    X2 = m.B.Position.X,
-                    Y2 = m.B.Position.Y,
-                    StrokeThickness = 3
+                    X1 = a.X,
+                    Y1 = a.Y,
+                    X2 = b.X,
+                    Y2 = b.Y,
+                    Stroke = color,
+                    StrokeThickness = m.Failed ? 4 : 2,
+                    Opacity = m.Failed ? 0.4 : 1.0
                 };
-
-                if (m.Failed)
-                {
-                    line.Stroke = Brushes.Red;
-                }
-                else
-                {
-                    double ratio = m.CurrentLoad / Math.Max(1, m.Capacity);
-
-                    line.Stroke = ratio switch
-                    {
-                        < 0.5 => Brushes.LimeGreen,
-                        < 0.8 => Brushes.Yellow,
-                        < 1.0 => Brushes.Orange,
-                        _ => Brushes.Magenta
-                    };
-                }
 
                 RenderCanvas.Children.Add(line);
             }
 
-            // draw nodes
-            foreach (var n in structure.Nodes)
+            // =========================
+            // NODES
+            // =========================
+            foreach (var n in _structure.Nodes)
             {
+                Vector2 world = new Vector2(
+                    n.Position.X + (float)(n.Ux * DisplacementScale),
+                    n.Position.Y + (float)(n.Uy * DisplacementScale)
+                );
+
+                Vector2 screen = WorldToScreen(world);
+
                 var ell = new Ellipse
                 {
                     Width = 10,
@@ -229,43 +286,27 @@ namespace StructureFailureSimulator
                     StrokeThickness = 2
                 };
 
-                Canvas.SetLeft(ell, n.Position.X - 5);
-                Canvas.SetTop(ell, n.Position.Y - 5);
+                Canvas.SetLeft(ell, screen.X - 5);
+                Canvas.SetTop(ell, screen.Y - 5);
 
                 RenderCanvas.Children.Add(ell);
             }
 
-            // build-mode hint overlay (simple)
-            if (_game.State == GameState.Build)
+            // =========================
+            // UI OVERLAY
+            // =========================
+            var text = new TextBlock
             {
-                var text = new System.Windows.Controls.TextBlock
-                {
-                    Text = $"BUILD MODE: {_tool}",
-                    Foreground = Brushes.White,
-                    FontSize = 16
-                };
+                Text =
+                    $"State: {_state}  |  Nodes: {_structure.Nodes.Count}  |  Members: {_structure.Members.Count}",
+                Foreground = Brushes.White,
+                FontSize = 14
+            };
 
-                Canvas.SetLeft(text, 10);
-                Canvas.SetTop(text, 10);
+            Canvas.SetLeft(text, 10);
+            Canvas.SetTop(text, 10);
 
-                RenderCanvas.Children.Add(text);
-            }
-
-            // results overlay
-            if (_game.State == GameState.Results)
-            {
-                var text = new System.Windows.Controls.TextBlock
-                {
-                    Text = "STRUCTURE FAILED - PRESS RETURN TO REBUILD",
-                    Foreground = Brushes.Red,
-                    FontSize = 20
-                };
-
-                Canvas.SetLeft(text, 200);
-                Canvas.SetTop(text, 200);
-
-                RenderCanvas.Children.Add(text);
-            }
+            RenderCanvas.Children.Add(text);
         }
     }
 }

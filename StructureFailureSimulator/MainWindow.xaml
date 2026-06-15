@@ -17,7 +17,7 @@
         <!-- ========================= -->
         <Canvas Name="RenderCanvas"
                 Background="#111"
-                MouseLeftButtonDown="Canvas_Click"/>
+                MouseLeftButtonDown="Canvas_MouseLeftButtonDown"/>
 
         <!-- ========================= -->
         <!-- TOOL PANEL -->

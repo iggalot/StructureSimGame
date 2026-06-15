@@ -99,7 +99,7 @@ namespace StructureFailureSimulator
                 _structure.Nodes.Add(new Node
                 {
                     Position = world,
-                    IsFixedSupport = true
+                    IsConstrained_DispX = true
                 });
 
                 _needsRedraw = true;
@@ -190,16 +190,6 @@ namespace StructureFailureSimulator
         }
 
         // =========================
-        // SIMULATION STEP (MANUAL CONTROL OR BUTTON DRIVEN)
-        // =========================
-        private void StepSimulation()
-        {
-            _engine.Step();
-            _needsRedraw = true;
-            Draw();
-        }
-
-        // =========================
         // RENDERING (ONLY WHEN NEEDED)
         // =========================
         private void Draw()
@@ -244,7 +234,7 @@ namespace StructureFailureSimulator
                 {
                     Width = 10,
                     Height = 10,
-                    Fill = n.IsFixedSupport ? Brushes.Cyan : Brushes.White
+                    Fill = n.IsConstrained_DispX ? Brushes.Cyan : Brushes.White
                 };
 
                 RenderCanvas.Children.Add(ell);

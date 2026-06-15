@@ -5,14 +5,14 @@
         public Node A;
         public Node B;
 
-        public double E = 200e9;
-        public double I = 1.0;
-        public double AArea = 1.0;
+        public double E = 29000000; // psi
+        public double I = 100.0; // in^4
+        public double AArea = 1.0; // sq. in.
 
-        public double YieldStrength = 250;
+        public double YieldStrength = 50000;  // psi
 
-        public double AxialForce;
-        public double Moment;
+        public double AxialForce;  // lbs
+        public double Moment;  // lb-in
 
         public bool Failed;
 

@@ -65,7 +65,7 @@ namespace StructureFailureSimulator
             {
                 var n = _structure.Nodes[i];
 
-                if (n.IsFixedSupport)
+                if (n.IsConstrained_DispX)
                 {
                     int idx = i * 3;
 

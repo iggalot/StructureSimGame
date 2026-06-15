@@ -9,6 +9,8 @@
         public double Uy;
         public double Rz;
 
-        public bool IsFixedSupport;
+        public bool IsConstrained_DispX; 
+        public bool IsConstrained_DispY;
+        public bool IsConstrained_RotZ;
     }
 }

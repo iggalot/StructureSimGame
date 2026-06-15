@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
@@ -8,50 +7,102 @@ namespace StructureFailureSimulator
     public class SimulationEngine
     {
         public Structure Structure { get; private set; }
-        private readonly Random _rng = new Random();
+        public RunContext Run { get; private set; }
 
-        public void Initialize(Structure structure)
+        public void Initialize(Structure structure, RunContext run)
         {
             Structure = structure;
+            Run = run;
         }
 
         public void Step()
         {
-            if (Structure == null) return;
+            Run.Advance();
 
-            ApplyRandomLoad();
-            PropagateLoads();
+            ApplyWindLoad();
+            ApplySeismicLoad();
+
+            SolveLoadDistribution();
+            ApplySupports();
+
             EvaluateFailure();
         }
 
-        private void ApplyRandomLoad()
-        {
-            // apply load to top nodes (simple heuristic)
-            foreach (var node in Structure.Nodes)
-            {
-                node.AppliedLoad *= 0.95f; // damping
+        #region LOADS
 
-                if (_rng.NextDouble() < 0.2)
-                    node.AppliedLoad += (float)_rng.Next(5, 20);
+        private void ApplyWindLoad()
+        {
+            // directional wind (left to right bias)
+            Vector2 windDir = new Vector2(1, 0);
+
+            foreach (var n in Structure.Nodes)
+            {
+                float heightFactor = 1f + (n.Position.Y * 0.002f);
+                n.AppliedLoad += Run.WindStrength * heightFactor;
             }
         }
 
-        private void PropagateLoads()
+        private void ApplySeismicLoad()
+        {
+            // global shaking pulse
+            foreach (var n in Structure.Nodes)
+            {
+                n.AppliedLoad += Run.SeismicPulse * 0.5f;
+            }
+        }
+
+        #endregion
+
+        #region SOLVER (LIGHTWEIGHT STIFFNESS APPROX)
+
+        private void SolveLoadDistribution()
         {
             foreach (var m in Structure.Members)
             {
                 if (m.Failed) continue;
 
-                float loadA = m.A.AppliedLoad;
-                float loadB = m.B.AppliedLoad;
+                float a = m.A.AppliedLoad;
+                float b = m.B.AppliedLoad;
 
-                m.CurrentLoad = (loadA + loadB) * 0.5f;
+                // stiffness-weighted transfer
+                float avg = (a + b) * 0.5f;
 
-                // distribute back into structure
-                m.A.AppliedLoad += m.CurrentLoad * 0.02f;
-                m.B.AppliedLoad += m.CurrentLoad * 0.02f;
+                float stiffnessFactor = 1f / (1f + m.Length * 0.01f);
+
+                m.CurrentLoad = avg * stiffnessFactor;
+
+                // propagate
+                m.A.AppliedLoad += m.CurrentLoad * 0.01f;
+                m.B.AppliedLoad += m.CurrentLoad * 0.01f;
             }
         }
+
+        #endregion
+
+        #region SUPPORTS
+
+        private void ApplySupports()
+        {
+            foreach (var n in Structure.Nodes)
+            {
+                if (n.IsFixedSupport)
+                {
+                    // fixed base absorbs load
+                    n.ReactionForce += n.AppliedLoad;
+                    n.AppliedLoad *= 0.1f;
+                }
+                else if (n.IsPinnedSupport)
+                {
+                    // partial reduction
+                    n.ReactionForce += n.AppliedLoad * 0.5f;
+                    n.AppliedLoad *= 0.5f;
+                }
+            }
+        }
+
+        #endregion
+
+        #region FAILURE
 
         private void EvaluateFailure()
         {
@@ -63,11 +114,20 @@ namespace StructureFailureSimulator
                 {
                     m.Failed = true;
 
-                    // failure cascade
-                    m.A.AppliedLoad += 10;
-                    m.B.AppliedLoad += 10;
+                    // cascade amplification
+                    m.A.AppliedLoad += 15;
+                    m.B.AppliedLoad += 15;
+
+                    // weaken neighbors indirectly
+                    foreach (var other in Structure.Members)
+                    {
+                        if (!other.Failed)
+                            other.Capacity *= 0.995f;
+                    }
                 }
             }
         }
+
+        #endregion
     }
 }

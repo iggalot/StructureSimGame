@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Xml.Linq;
 
 namespace StructureFailureSimulator
 {
@@ -7,5 +6,8 @@ namespace StructureFailureSimulator
     {
         public List<Node> Nodes { get; set; } = new();
         public List<Member> Members { get; set; } = new();
+
+        // NEW: supports quick lookup
+        public List<Node> Supports { get; set; } = new();
     }
 }

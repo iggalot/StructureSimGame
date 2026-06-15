@@ -1,9 +1,77 @@
 <Window x:Class="StructureFailureSimulator.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Structure Failure Simulator" Height="700" Width="1000">
+        Title="Structural Roguelike Simulator"
+        Height="720"
+        Width="1200"
+        Background="#1e1e1e">
 
     <Grid>
-        <Canvas Name="RenderCanvas" Background="Black"/>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="220"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ========================= -->
+        <!-- CANVAS (BUILD + SIM VIEW) -->
+        <!-- ========================= -->
+        <Canvas Name="RenderCanvas"
+                Background="#111"
+                MouseLeftButtonDown="Canvas_Click"/>
+
+        <!-- ========================= -->
+        <!-- TOOL PANEL -->
+        <!-- ========================= -->
+        <StackPanel Grid.Column="1"
+                    Background="#2b2b2b"
+                    >
+
+            <TextBlock Text="TOOLS"
+                       Foreground="White"
+                       FontSize="16"
+                       Margin="0,0,0,10"/>
+
+            <Button Content="Node Tool"
+                    Click="ToolNode_Click"
+                    Margin="0,0,0,5"/>
+
+            <Button Content="Support Tool"
+                    Click="ToolSupport_Click"
+                    Margin="0,0,0,5"/>
+
+            <Button Content="Connect Tool"
+                    Click="ToolConnect_Click"
+                    Margin="0,0,0,15"/>
+
+            <TextBlock Text="SIMULATION"
+                       Foreground="White"
+                       FontSize="16"
+                       Margin="0,10,0,10"/>
+
+            <Button Content="Start Run"
+                    Click="StartRun_Click"
+                    Margin="0,0,0,5"/>
+
+            <Button Content="Stop Run"
+                    Click="StopRun_Click"
+                    Margin="0,0,0,5"/>
+
+            <Button Content="Return to Build"
+                    Click="ReturnToBuild_Click"
+                    Margin="0,0,0,15"/>
+
+            <TextBlock Text="CONTROLS:"
+                       Foreground="Gray"
+                       Margin="0,20,0,5"/>
+
+            <TextBlock Text="Click: place / connect"
+                       Foreground="Gray"/>
+
+            <TextBlock Text="Cyan nodes = supports"
+                       Foreground="Gray"/>
+
+            <TextBlock Text="Red = failure"
+                       Foreground="Gray"/>
+        </StackPanel>
     </Grid>
 </Window>

@@ -1,18 +1,14 @@
-﻿using System.Numerics;
-
-namespace StructureFailureSimulator
+﻿namespace StructureFailureSimulator
 {
     public class Node
     {
-        public int Id { get; set; }
-        public Vector2 Position { get; set; }
+        public System.Numerics.Vector2 Position;
 
-        public float AppliedLoad;
+        // FEM DOF (2D frame)
+        public double Ux;
+        public double Uy;
+        public double Rz;
 
-        // NEW: structural boundary condition
         public bool IsFixedSupport;
-        public bool IsPinnedSupport;
-
-        public float ReactionForce;
     }
 }

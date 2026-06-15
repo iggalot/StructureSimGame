@@ -2,17 +2,25 @@
 {
     public class Member
     {
-        public Node A { get; set; }
-        public Node B { get; set; }
+        public Node A;
+        public Node B;
 
-        public float Capacity = 50f;
+        public double E = 200e9;
+        public double I = 1.0;
+        public double AArea = 1.0;
 
-        // NEW physics-ish properties
-        public float Stiffness = 1.0f;   // resistance to deformation
-        public float CurrentLoad;
+        public double YieldStrength = 250;
+
+        public double AxialForce;
+        public double Moment;
+
         public bool Failed;
 
-        public float Length =>
+        public double Length =>
             System.Numerics.Vector2.Distance(A.Position, B.Position);
+
+        // COMPATIBILITY PROPERTY FOR UI
+        public double CurrentLoad => AxialForce;
+        public double Capacity => YieldStrength;
     }
 }

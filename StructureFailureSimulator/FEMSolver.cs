@@ -6,10 +6,7 @@ namespace StructureFailureSimulator
     public class FEMSolver
     {
         private Structure _s;
-        double[,] K_global;  // global stiffness matrix
-        double[,] K_local;  // global stiffness matrix
-        double[,] T;  // local to global transformation matrix
-
+        double[,] K;  // global stiffness matrix
         double[] F;  // applied load vector
 
         // cached node lookup (CRITICAL FIX)
@@ -23,8 +20,7 @@ namespace StructureFailureSimulator
 
             int n = _s.Nodes.Count * 3;
 
-            K_global = new double[n, n];
-            K_local = new double[n, n];
+            K = new double[n, n];
 
             F = new double[n];
 
@@ -62,13 +58,9 @@ namespace StructureFailureSimulator
                 if (!_nodeIndex.TryGetValue(m.A, out int i)) continue;
                 if (!_nodeIndex.TryGetValue(m.B, out int j)) continue;
 
-                double L = m.Length;
-                double EA = m.E * m.AArea;
-                double EI = m.E * m.I;
-
-                double k = EA / L;
-                double kb_basic = EI / (L * L * L);
-
+                // =========================
+                // DOF MAP (GLOBAL SYSTEM)
+                // =========================
                 int i0 = i * 3;
                 int j0 = j * 3;
 
@@ -78,64 +70,96 @@ namespace StructureFailureSimulator
                     j0 + 0, j0 + 1, j0 + 2
                 };
 
-                // axial
-                K_local [dof[0], dof[0]] += k;
-                K_local[dof[0], dof[3]] += -k;
-
-                K_local[dof[1], dof[1]] += 12 * kb_basic;
-                K_local[dof[1], dof[2]] += 6 * L * kb_basic;
-                K_local[dof[1], dof[4]] += -12 * kb_basic;
-                K_local[dof[1], dof[5]] += 6 * L * kb_basic;
-
-                K_local[dof[2], dof[1]] += 6 * L * kb_basic;
-                K_local[dof[2], dof[2]] += 4 * L * L * kb_basic;
-                K_local[dof[2], dof[4]] += -6 * L * kb_basic;
-                K_local[dof[2], dof[5]] += 2 * L * L * kb_basic;
-
-                K_local[dof[3], dof[0]] += -k;
-                K_local[dof[3], dof[3]] += k;
-
-                K_local[dof[4], dof[1]] += -12 * kb_basic;
-                K_local[dof[4], dof[2]] += -6 * L * kb_basic;
-                K_local[dof[4], dof[4]] += 12 * kb_basic;
-                K_local[dof[4], dof[5]] += -6 * L * kb_basic;
-
-                K_local[dof[5], dof[1]] += 6 * L * kb_basic;
-                K_local[dof[5], dof[2]] += 2 * L * L * kb_basic;
-                K_local[dof[5], dof[4]] += -6 * L * kb_basic;
-                K_local[dof[5], dof[5]] += 4 * L * L * kb_basic;
-
-                // transformation matrix
+                // =========================
+                // GEOMETRY
+                // =========================
                 double dx = m.B.Position.X - m.A.Position.X;
                 double dy = m.B.Position.Y - m.A.Position.Y;
 
-                double delta_L = Math.Sqrt(dx * dx + dy * dy);
+                double L = Math.Sqrt(dx * dx + dy * dy);
+                if (L < 1e-9) continue;
 
-                double c = dx / delta_L;
-                double s = dy / delta_L;
+                double c = dx / L;
+                double s = dy / L;
 
-                // transformation matrix
+                // =========================
+                // MATERIAL PROPERTIES
+                // =========================
+                double EA = m.E * m.AArea;
+                double EI = m.E * m.I;
+
+                double k = EA / L;
+                double kb = EI / (L * L * L);
+
+                // =========================
+                // LOCAL 6x6 STIFFNESS MATRIX
+                // =========================
+                double[,] kLocal = new double[6, 6];
+
+                // axial
+                kLocal[0, 0] = k;
+                kLocal[0, 3] = -k;
+                kLocal[3, 0] = -k;
+                kLocal[3, 3] = k;
+
+                // bending (y-direction local frame)
+                kLocal[1, 1] = 12 * kb;
+                kLocal[1, 2] = 6 * L * kb;
+                kLocal[1, 4] = -12 * kb;
+                kLocal[1, 5] = 6 * L * kb;
+
+                kLocal[2, 1] = 6 * L * kb;
+                kLocal[2, 2] = 4 * L * L * kb;
+                kLocal[2, 4] = -6 * L * kb;
+                kLocal[2, 5] = 2 * L * L * kb;
+
+                kLocal[4, 1] = -12 * kb;
+                kLocal[4, 2] = -6 * L * kb;
+                kLocal[4, 4] = 12 * kb;
+                kLocal[4, 5] = -6 * L * kb;
+
+                kLocal[5, 1] = 6 * L * kb;
+                kLocal[5, 2] = 2 * L * L * kb;
+                kLocal[5, 4] = -6 * L * kb;
+                kLocal[5, 5] = 4 * L * L * kb;
+
+                // =========================
+                // TRANSFORMATION MATRIX
+                // =========================
                 double[,] T =
                 {
                     { c,  s, 0, 0, 0, 0 },
                     {-s,  c, 0, 0, 0, 0 },
                     { 0,  0, 1, 0, 0, 0 },
 
-                    { 0,  0, 0, c, s, 0 },
-                    { 0,  0, 0,-s, c, 0 },
-                    { 0,  0, 0, 0, 0, 1 }
+                    { 0,  0, 0, c,  s, 0 },
+                    { 0,  0, 0,-s,  c, 0 },
+                    { 0,  0, 0, 0,  0, 1 }
                 };
 
-                // transposed transformation
                 double[,] TT = Transpose(T);
 
-                // compute K_global using TT * K_local * T
-                double[,] temp = Multiply(TT, K_local);
-                K_global = Multiply(temp, T);
+                // =========================
+                // kGlobal = Tᵀ kLocal T
+                // =========================
+                double[,] temp = Multiply(TT, kLocal);
+                double[,] kGlobal = Multiply(temp, T);
 
-                // gravity load
-                F[dof[1]] -= 10000;
-                F[dof[4]] -= 10000;
+                // =========================
+                // ASSEMBLE INTO STRUCTURE MATRIX
+                // =========================
+                for (int r = 0; r < 6; r++)
+                {
+                    for (int c2 = 0; c2 < 6; c2++)
+                    {
+                        K[dof[r], dof[c2]] += kGlobal[r, c2];
+                    }
+                }
+
+                // =========================
+                // LOAD VECTOR (OPTIONAL)
+                // =========================
+                F[dof[3]] += 10000;
             }
         }
 
@@ -191,13 +215,13 @@ namespace StructureFailureSimulator
                 {
                     int idx = i * 3 + d;
 
-                    for (int j = 0; j < K_global.GetLength(0); j++)
+                    for (int j = 0; j < K.GetLength(0); j++)
                     {
-                        K_global[idx, j] = 0;
-                        K_global[j, idx] = 0;
+                        K[idx, j] = 0;
+                        K[j, idx] = 0;
                     }
 
-                    K_global[idx, idx] = 1;
+                    K[idx, idx] = 1;
                     F[idx] = 0;
                 }
             }
@@ -213,15 +237,15 @@ namespace StructureFailureSimulator
 
             for (int i = 0; i < n; i++)
             {
-                double pivot = K_global[i, i];
+                double pivot = K[i, i];
                 if (Math.Abs(pivot) < 1e-10) continue;
 
                 for (int j = i + 1; j < n; j++)
                 {
-                    double f = K_global[j, i] / pivot;
+                    double f = K[j, i] / pivot;
 
                     for (int k = i; k < n; k++)
-                        K_global[j, k] -= f * K_global[i, k];
+                        K[j, k] -= f * K[i, k];
 
                     F[j] -= f * F[i];
                 }
@@ -232,9 +256,9 @@ namespace StructureFailureSimulator
                 double sum = F[i];
 
                 for (int j = i + 1; j < n; j++)
-                    sum -= K_global[i, j] * x[j];
+                    sum -= K[i, j] * x[j];
 
-                x[i] = sum / (K_global[i, i] == 0 ? 1 : K_global[i, i]);
+                x[i] = sum / (K[i, i] == 0 ? 1 : K[i, i]);
             }
 
             return x;

@@ -5,11 +5,14 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 
 namespace StructureFailureSimulator
 {
     public partial class MainWindow : Window
     {
+        private readonly DispatcherTimer _simTimer = new DispatcherTimer();
+
         private readonly SimulationEngine _engine = new SimulationEngine();
         private readonly Structure _structure = new Structure();
         private readonly RunContext _run = new RunContext(Environment.TickCount);
@@ -35,9 +38,23 @@ namespace StructureFailureSimulator
         {
             InitializeComponent();
 
+            _simTimer.Interval = TimeSpan.FromMilliseconds(50); // controllable sim speed
+            _simTimer.Tick += SimTick;
+
             _engine.Initialize(_structure, _run);
 
             Draw(); // initial render
+        }
+
+        private void SimTick(object sender, EventArgs e)
+        {
+            if (_state != GameState.Simulate)
+                return;
+
+            _engine.Step();
+
+            _needsRedraw = true;
+            Draw();
         }
 
         // =========================
@@ -148,11 +165,20 @@ namespace StructureFailureSimulator
         private void StartRun_Click(object sender, RoutedEventArgs e)
         {
             _state = GameState.Simulate;
+            _simTimer.Start();
         }
 
         private void StopRun_Click(object sender, RoutedEventArgs e)
         {
             _state = GameState.Build;
+            _simTimer.Stop();
+        }
+
+        private void StepRun_Click(object sender, RoutedEventArgs e)
+        {
+            _engine.Step();
+            _needsRedraw = true;
+            Draw();
         }
 
         private void ReturnToBuild_Click(object sender, RoutedEventArgs e)
